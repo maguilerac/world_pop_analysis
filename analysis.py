@@ -1,7 +1,7 @@
 import asyncio
 
 from us_cities_helper import CityDataProvider, CityInfo
-from worldpop_helper import perform_us_city_query
+from worldpop_helper import WorldPopAdvancedQuery
 
 
 def select_state(city_data_provider: CityDataProvider) -> str | None:
@@ -120,28 +120,37 @@ async def main() -> None:
                 continue
             geojson_data = selected_city.boundary_data
 
-            try:
-                start_year = int(input("Enter the initial year of the query: ").strip())
-                end_year = int(input("Enter the end year of the query: ").strip())
+            # try:
+            start_year = int(input("Enter the initial year of the query: ").strip())
+            end_year = int(input("Enter the end year of the query: ").strip())
 
-                if start_year > end_year:
-                    print(
-                        "Invalid range: Start year must be less than or equal to end year."
-                    )
-                    continue
-
-                taskids = await perform_us_city_query(
-                    int(selected_variable), start_year, end_year, geojson_data
+            if start_year > end_year:
+                print(
+                    "Invalid range: Start year must be less than or equal to end year."
                 )
-                print(taskids)
+                continue
+
+            # Create advanced API query
+            query = WorldPopAdvancedQuery(
+                int(selected_variable), start_year, end_year, geojson_data
+            )
+            taskids = await query.perform_us_city_query()
+            print(taskids)
+            results = await query.retrieve_results(taskids)
+            print(
+                f"\nResults for '{city_variables[selected_variable]}'"
+                + f" in {str(selected_city)} from {start_year} to {end_year}:"
+            )
+            for year, result in results.items():
+                print(f"\t* {year}: {result}")
                 # if result:
                 #     print(f"\nQuery result: {result}")
                 #     ...
                 # else:
                 #     print(f"No data found for {selected_variable} in {selected_city}.")
 
-            except ValueError:
-                print("Invalid input. Please enter numeric values for years.")
+            # except ValueError:
+            #     print("Invalid input. Please enter numeric values for years.")
 
         elif choice == "4":
             filename = input(

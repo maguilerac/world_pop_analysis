@@ -7,4 +7,6 @@ The application aims to provide the user the following information from a given 
 * Total population
 * Age and sex structures
 
-Current status: Application opens query tasks asynchronously and retrieves their ids to monitor them
+Current status: Application opens query tasks asynchronously and retrieves results for total population case.
+* Request-URI Too Long errors are obtained in some cases due to long geojsons.
+* Geojsons with multypolygon feature geometries are also leading to errors.

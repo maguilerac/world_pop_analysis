@@ -10,6 +10,7 @@ JSONList = list[JSON]
 
 def http_get_sync(url: str) -> JSONObject:
     response = requests.get(url)
+    response.raise_for_status()
     return response.json()
 
 

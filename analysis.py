@@ -3,8 +3,11 @@ import asyncio
 from us_cities_helper import CityDataProvider, CityInfo
 from worldpop_helper import WorldPopAdvancedQuery
 
+# City variable options available in WorldPop advanced API (i.e. datasets)
+CITY_VARIABLES = ["Total Population", "Age and Sex Structures"]
 
-def select_state(city_data_provider: CityDataProvider) -> str | None:
+
+def __select_state(city_data_provider: CityDataProvider) -> str | None:
     """
     Prompt the user for a state in the U.S. It returns None if the user's input
     is invalid, or the code of the state (string) if the user's choice is valid.
@@ -36,14 +39,16 @@ def select_state(city_data_provider: CityDataProvider) -> str | None:
     return None
 
 
-def select_city(city_data_provider: CityDataProvider) -> CityInfo | None:
+def select_city() -> CityInfo | None:
     """
     Prompt the user for a state and a city in the U.S. It returns a CityInfo
     object if the user's choice for state and city are valid.
     """
 
+    city_data_provider = CityDataProvider()
+
     # Prompt user for the state
-    state_code = select_state(city_data_provider)
+    state_code = __select_state(city_data_provider)
     if not state_code:
         return None
 
@@ -77,15 +82,95 @@ def select_city(city_data_provider: CityDataProvider) -> CityInfo | None:
     return None
 
 
+def select_variable(selected_city: CityInfo | None) -> int | None:
+    """
+    Prompt the user for the variable to be queried in the chosen
+    city:
+    * 1: Total Population
+    * 2: Age and Sex Structures
+    """
+
+    if not selected_city:
+        print("Please choose a city first.")
+        return None
+    print("\nAvailable variables:")
+    for index, variable in enumerate(CITY_VARIABLES):
+        print(f"{index + 1}. {variable}")
+    try:
+        selected_variable = int(
+            input("\nEnter the variable to be determined: ").strip()
+        )
+    except ValueError:
+        print("Invalid value for variable. Try again.")
+        return None
+    if selected_variable < 0 or selected_variable > 2:
+        print(f"Variable '{selected_variable}' not found. Try again.")
+        return None
+    else:
+        print(f"Variable '{CITY_VARIABLES[selected_variable - 1]}' selected.")
+    return selected_variable
+
+
+async def execute_query(selected_city: CityInfo, selected_variable: int) -> None:
+    """
+    Execute query on specified city and variable. Print the results.
+    """
+
+    geojson_data = selected_city.boundary_data
+
+    try:
+        start_year = int(input("Enter the initial year of the query: ").strip())
+        end_year = int(input("Enter the end year of the query: ").strip())
+
+        # Create error message to use it later if required
+        error_message = (
+            f"\nResults for '{CITY_VARIABLES[selected_variable - 1]}'"
+            + f" in {str(selected_city)} from {start_year} to {end_year}:"
+        )
+
+        if start_year > end_year:
+            print("Invalid range: Start year must be less than or equal to end year.")
+            return None
+
+        # Create advanced API query
+        query = WorldPopAdvancedQuery(
+            selected_variable, start_year, end_year, geojson_data
+        )
+        taskids = await query.perform_us_city_query()
+        if all(taskid is not None for taskid in taskids):
+            results = await query.retrieve_results(taskids)
+            print(error_message)
+            if results:
+                if selected_variable == 1:
+                    for year, result in results.items():
+                        print(f"\n\t* {year}: {result}")
+                else:
+                    for year, result in results.items():
+                        print(f"\n\t* {year}:")
+                        for item in result:
+                            print(f"\t  {str(item)}")
+            else:
+                print(error_message)
+        else:
+            print(
+                f"\nNo data can be obtained for '{CITY_VARIABLES[selected_variable - 1]}'"
+                + f" in {str(selected_city)} from {start_year} to {end_year}."
+            )
+            return None
+    except ValueError:
+        print("Invalid input. Please enter numeric values for years.")
+        return None
+
+
 async def main() -> None:
-    city_data_provider = CityDataProvider()
-
-    # City variable options available in WorldPop advanced API (i.e. datasets)
-    city_variables = {"1": "Total Population", "2": "Age and Sex Structures"}
-
     # Initialize variables containing user choices
     selected_city = None
     selected_variable = None
+
+    print("""
+***************************************
+* WELCOME TO THE WORLD POP QUERY TOOL *
+***************************************""")
 
     while True:
         print("\nChoose an option:")
@@ -95,62 +180,19 @@ async def main() -> None:
         print("4. Export results to file")
         print("5. Exit the program")
 
-        choice = input("Enter your choice (1-5): ").strip()
+        choice = input("\nEnter your choice (1-5): ").strip()
 
         if choice == "1":
-            selected_city = select_city(city_data_provider)
+            selected_city = select_city()
 
         elif choice == "2":
-            if not selected_city:
-                print("Please choose a city first.")
-                continue
-            print("\nAvailable variables:")
-            for index, variable in city_variables.items():
-                print(f"{index}. {variable}")
-            selected_variable = input("\nEnter the variable to be determined: ").strip()
-            if selected_variable not in city_variables.keys():
-                print(f"Variable '{selected_variable}' not found. Try again.")
-                selected_variable = None
-            else:
-                print(f"Variable '{city_variables[selected_variable]}' selected.")
+            selected_variable = select_variable(selected_city)
 
         elif choice == "3":
             if not selected_city or not selected_variable:
                 print("Please choose a city and a variable first.")
                 continue
-            geojson_data = selected_city.boundary_data
-
-            # try:
-            start_year = int(input("Enter the initial year of the query: ").strip())
-            end_year = int(input("Enter the end year of the query: ").strip())
-
-            if start_year > end_year:
-                print(
-                    "Invalid range: Start year must be less than or equal to end year."
-                )
-                continue
-
-            # Create advanced API query
-            query = WorldPopAdvancedQuery(
-                int(selected_variable), start_year, end_year, geojson_data
-            )
-            taskids = await query.perform_us_city_query()
-            print(taskids)
-            results = await query.retrieve_results(taskids)
-            print(
-                f"\nResults for '{city_variables[selected_variable]}'"
-                + f" in {str(selected_city)} from {start_year} to {end_year}:"
-            )
-            for year, result in results.items():
-                print(f"\t* {year}: {result}")
-                # if result:
-                #     print(f"\nQuery result: {result}")
-                #     ...
-                # else:
-                #     print(f"No data found for {selected_variable} in {selected_city}.")
-
-            # except ValueError:
-            #     print("Invalid input. Please enter numeric values for years.")
+            await execute_query(selected_city, selected_variable)
 
         elif choice == "4":
             filename = input(

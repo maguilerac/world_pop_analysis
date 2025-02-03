@@ -3,6 +3,7 @@ import json
 import os
 from dataclasses import asdict, dataclass, field
 
+from logger_utils import logger
 from req_http import JSONObject, http_get_sync
 
 
@@ -26,7 +27,7 @@ class CityInfo:
 
     @property
     def boundary_data(self) -> JSONObject:
-        return split_multipolygon(http_get_sync(self.raw_url))
+        return http_get_sync(self.raw_url)
 
     def __str__(self) -> str:
         return self.name.title()
@@ -61,36 +62,6 @@ def get_github_repo_contents_2(file_name: str) -> JSONObject:
     return data
 
 
-def split_multipolygon(input_data: JSONObject) -> JSONObject:
-    """
-    Split geojson's multipolygon geometry features into several polygon
-    geometry features.
-    """
-
-    new_data: JSONObject = {"type": "FeatureCollection", "features": []}
-    has_multipolygon_geometry = False
-
-    if input_data["features"]:
-        features = input_data["features"]
-        for feature in features:
-            if (feature["geometry"] is not None) and (
-                feature["geometry"]["type"] == "MultiPolygon"
-            ):
-                has_multipolygon_geometry = True
-                for poly in feature["geometry"]["coordinates"]:
-                    xfeature = {
-                        "type": "Feature",
-                        "properties": {},
-                        "geometry": {"type": "Polygon"},
-                    }
-                    xfeature["geometry"]["coordinates"] = poly
-                    new_data["features"].append(xfeature)
-
-    if has_multipolygon_geometry:
-        return new_data
-    return input_data
-
-
 class CityDataProvider:
     def __init__(self):
         """
@@ -101,22 +72,38 @@ class CityDataProvider:
         self.__state_name_mapping: dict[str, str] = self.__get_state_name_mapping()
         if os.path.exists("./data/cities/cities.json"):
             print("cities.json file exists! Importing data...")
+            logger.info("Loading U.S. city data from cities.json...")
             self.__import_city_info_catalog()
+            logger.info("U.S. city data succesfully loaded!")
         else:
             print("cities.json file does not exist! Retrieving data from server...")
+            logger.info(
+                "File cities.json cannot be found! Retrieving U.S."
+                + " city data from GitHub repository..."
+            )
             self.__generate_city_info_catalog()
+            logger.info(
+                "U.S. city data succesfully retrieved from GitHub."
+                + " Internal catalog built."
+            )
             self.__export_city_info_catalog()
+            logger.info(
+                "U.S. city data exported to ./data/cities/cities.json"
+                + " for future query sessions!"
+            )
 
     def __get_state_name_mapping(self) -> dict[str, str]:
         """
         Get a dictionary mapping state names with their abbreviations.
         """
         with open("./data/US_States.csv", mode="r") as file:
+            logger.info("Loading data from ./data/US_States.csv...")
             csvFile = csv.DictReader(file)
             state_data = {
                 state_data["Abbreviation"]: state_data["State"]
                 for state_data in csvFile
             }
+            logger.info("Data succesfully loaded!")
             return state_data
 
     def __fill_city_info(self) -> None:
@@ -125,6 +112,10 @@ class CityDataProvider:
         """
         for abbrev, state in self.__city_info_catalog.items():
             # Get city-related contents from GitHub repo
+            logger.info(
+                f"Requesting city data from path='./cities/{abbrev}' "
+                + "in 'geojson-us-city-boundaries' GitHub repository..."
+            )
             city_contents = get_github_repo_contents(
                 "generalpiston", "geojson-us-city-boundaries", f"cities/{abbrev}"
             )
@@ -150,6 +141,10 @@ class CityDataProvider:
         geojson-us-city-boundaries GitHub repository.
         """
         # Get state-related contents from GitHub repo
+        logger.info(
+            "Requesting state data from path='./cities' "
+            + "in 'geojson-us-city-boundaries' GitHub repository..."
+        )
         state_contents = get_github_repo_contents(
             "generalpiston", "geojson-us-city-boundaries", "cities"
         )
@@ -200,6 +195,7 @@ class CityDataProvider:
         """
 
         # Open and read the JSON file
+        logger.info("Loading city data from './data/cities/cities.json'....")
         with open("./data/cities/cities.json", "r") as file:
             imported_data = json.load(file)
 

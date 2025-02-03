@@ -1,11 +1,24 @@
 import json
 import time
+from dataclasses import dataclass
 from typing import AsyncGenerator
 
+from logger_utils import logger
 from req_http import JSON, JSONObject, http_get
 
 DATASETS = ["wpgppop", "wpgpas"]
 API_URL_BASE = "https://api.worldpop.org/v1"
+
+
+@dataclass
+class AgeSexClass:
+    number: int
+    ageRange: str
+    male: float
+    female: float
+
+    def __str__(self) -> str:
+        return f"> [Age: {self.ageRange}] / Male: {self.male}, Female: {self.female}"
 
 
 class WorldPopAdvancedQuery:
@@ -43,8 +56,9 @@ class WorldPopAdvancedQuery:
 
         query_string = self.__generate_query_string(year)
         results = await http_get(query_string)
-        self.__query_tasks_by_year[year] = str(results["taskid"])
-        return results["taskid"]
+        if results:
+            self.__query_tasks_by_year[year] = str(results["taskid"])
+            return results["taskid"]
 
     async def __next_subquery(self) -> AsyncGenerator[JSON, None]:
         """
@@ -58,6 +72,7 @@ class WorldPopAdvancedQuery:
 
         for year in range(self.__start_year, self.__end_year + 1):
             taskid = await self.__create_query_task(year)
+            logger.info(f"Query task created for year {year} with id = {taskid}")
             yield taskid
 
     async def __monitor_query_task(self, taskid: JSON) -> JSONObject:
@@ -78,13 +93,29 @@ class WorldPopAdvancedQuery:
 
         while len(taskids) > 0:
             response = await self.__monitor_query_task(taskids[0])
-            print(f"Task #{taskids[0]} {response['status']}")
             if response["status"] == "finished":
+                if response["error"]:
+                    logger.error(response["error_message"])
+                else:
+                    logger.info(f"Task #{taskids[0]} finished!")
                 del taskids[0]
-                print("Task finished!")
                 yield response
             else:
                 time.sleep(1)
+
+    def __transform_pyramid_to_objects(
+        self, pyramid_data: list[dict[str, JSON]]
+    ) -> list[AgeSexClass]:
+        pyramid = [
+            AgeSexClass(
+                int(item["class"]),
+                str(item["age"]),
+                float(item["male"]),
+                float(item["female"]),
+            )
+            for item in pyramid_data
+        ]
+        return pyramid
 
     async def perform_us_city_query(self) -> list[JSON]:
         """
@@ -99,18 +130,35 @@ class WorldPopAdvancedQuery:
         taskids = [taskid async for taskid in self.__next_subquery()]
         return taskids
 
-    async def retrieve_results(self, taskids: list[JSON]) -> dict[int, float]:
+    async def retrieve_results(
+        self, taskids: list[JSON]
+    ) -> dict[int, float | list[AgeSexClass]] | None:
         """
         abc
         """
 
         raw_results = [response async for response in self.__next_monitor(taskids)]
-        raw_results = {
-            result["taskid"]: float(result["data"]["total_population"])
-            for result in raw_results
-        }
-        results = {
-            year: raw_results[taskid]
-            for year, taskid in self.__query_tasks_by_year.items()
-        }
-        return results
+        if any(result["error"] for result in raw_results):
+            error_messages = (
+                result["error_message"] for result in raw_results if result["error"]
+            )
+            print(next(error_messages))
+            return None
+        else:
+            if self.__dataset_id == 1:
+                raw_results = {
+                    result["taskid"]: float(result["data"]["total_population"])
+                    for result in raw_results
+                }
+            else:
+                raw_results = {
+                    result["taskid"]: self.__transform_pyramid_to_objects(
+                        result["data"]["agesexpyramid"]
+                    )
+                    for result in raw_results
+                }
+            results = {
+                year: raw_results[taskid]
+                for year, taskid in self.__query_tasks_by_year.items()
+            }
+            return results
